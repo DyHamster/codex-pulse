@@ -79,31 +79,6 @@ python3 scripts/install-local.py
 
 服务仅绑定 `127.0.0.1`，API 需要随机访问密钥，并校验 Host/Origin。状态和历史在内存中；临时运行目录仅当前用户可访问，保存访问密钥、PID 和服务日志。服务停止后删除连接描述文件。浏览器标签页保留最近 40 次探测图，不上传遥测。
 
-## 发布到 GitHub
-
-仓库已经忽略了 `build/`、日志、`.DS_Store` 和本机生成文件，不要把 `~/Applications` 下的应用或临时目录加入 Git。发布前执行：
-
-```sh
-npm test
-npm run build:menubar
-git init
-git add .
-git commit -m "Initial release of Codex Pulse"
-git branch -M main
-```
-
-然后在 GitHub 创建一个名为 `codex-pulse` 的空仓库，不要勾选自动生成 README、`.gitignore` 或 License。把 GitHub 页面给出的地址代入：
-
-```sh
-git remote add origin https://github.com/YOUR_NAME/codex-pulse.git
-git push -u origin main
-```
-
-最后把本页“快速安装”中的 `YOUR_NAME` 换成你的 GitHub 用户名，再提交并推送一次。GitHub Actions 会自动运行 Node 测试并在 macOS 环境验证菜单栏构建。
-
-当前分发方式是源码构建，因此不会遇到未公证二进制应用的签名问题。若以后提供可下载的 `.app` 或 `.dmg`，建议申请 Apple Developer ID、完成签名和 notarization，再放入 GitHub Releases。
-
-代码使用 MIT License。公开前请确认 `plugin.json` 中的作者名称符合你的预期。
 
 ## 更新与卸载
 
