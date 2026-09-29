@@ -1,0 +1,34 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "codex-pulse",
+  "version": "0.2.0",
+  "description": "Display Codex quota and proxy status in the macOS menu bar.",
+  "author": {
+    "name": "Dere-HanMing"
+  },
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "quota",
+    "macos",
+    "menu-bar"
+  ],
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "Codex Pulse",
+        "shortDescription": "Codex quota and proxy status",
+        "longDescription": "Shows remaining Codex quota, token usage, and connection status, with an optional native macOS menu bar app.",
+        "developerName": "Dere-HanMing",
+        "category": "Productivity",
+        "capabilities": [
+          "Read"
+        ],
+        "defaultPrompt": [
+          "查看我的 Codex 剩余额度和网络状态",
+          "打开 Codex Pulse 实时监控面板"
+        ]
+      }
+    }
+  }
+}

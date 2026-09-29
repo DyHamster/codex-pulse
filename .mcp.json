@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "pulse": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "src/mcp.mjs"
+      ],
+      "cwd": "."
+    }
+  }
+}

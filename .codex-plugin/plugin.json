@@ -1,0 +1,24 @@
+{
+  "name": "codex-pulse",
+  "version": "0.2.0",
+  "description": "本地实时显示 Codex 使用额度、Token 用量与网络连接质量。",
+  "author": {
+    "name": "Dere-HanMing"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Pulse",
+    "shortDescription": "实时额度与连接监控",
+    "longDescription": "本地监控 Codex 账号额度与网络，提供实时面板、重置倒计时和异常状态。",
+    "developerName": "Dere-HanMing",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "查看我的 Codex 剩余额度和网络状态",
+      "打开 Codex Pulse 实时监控面板"
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

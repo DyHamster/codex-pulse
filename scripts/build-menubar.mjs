@@ -1,0 +1,18 @@
+import { mkdir, writeFile, cp } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { descriptor, origin } from '../src/config.mjs';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const app = join(root, 'build/Codex Pulse.app');
+const resources = join(app, 'Contents/Resources');
+await mkdir(join(app, 'Contents/MacOS'), { recursive: true });
+await mkdir(resources, { recursive: true });
+const plist = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>local.codex.pulse.menubar</string><key>CFBundleName</key><string>Codex Pulse</string><key>CFBundleExecutable</key><string>CodexPulse</string><key>CFBundleVersion</key><string>1</string><key>CFBundleShortVersionString</key><string>0.2.0</string><key>CFBundlePackageType</key><string>APPL</string><key>LSUIElement</key><true/><key>LSMinimumSystemVersion</key><string>13.0</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict></dict></plist>`;
+await writeFile(join(app, 'Contents/Info.plist'), plist);
+await writeFile(join(resources, 'config.json'), JSON.stringify({ node: process.execPath, descriptor, origin }));
+for (const dir of ['src', 'public']) await cp(join(root, dir), join(resources, 'monitor', dir), { recursive: true });
+execFileSync('swiftc', ['-swift-version', '5', '-module-cache-path', join(root, 'build/module-cache'), join(root, 'native/Pulse.swift'), '-o', join(app, 'Contents/MacOS/CodexPulse'), '-framework', 'AppKit', '-framework', 'CFNetwork'], { stdio: 'inherit' });
+execFileSync(join(app, 'Contents/MacOS/CodexPulse'), ['--self-test'], { stdio: 'inherit' });
+execFileSync('codesign', ['--force', '--sign', '-', app], { stdio: 'inherit' });
+console.log(app);
