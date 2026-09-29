@@ -7,7 +7,7 @@
 要求：macOS 13+、Node.js 22+、已登录的 Codex CLI，以及 Xcode Command Line Tools。
 
 ```sh
-git clone https://github.com/YOUR_NAME/codex-pulse.git
+git clone https://github.com/DyHamster/codex-pulse.git
 cd codex-pulse
 npm run install:menubar
 ```
