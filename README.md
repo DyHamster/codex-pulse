@@ -4,7 +4,7 @@
 
 ## 快速安装
 
-要求：macOS 13+、Node.js 22+、已登录的 Codex CLI，以及 Xcode Command Line Tools。
+要求：macOS 13+、Node.js 22+、已登录的 Codex CLI，以及 Xcode Command Line Tools。构建脚本会明确以当前机器架构和 `macOS 13.0` 为目标，不依赖 Swift 工具链的默认部署版本。
 
 ```sh
 git clone https://github.com/DyHamster/codex-pulse.git
@@ -79,7 +79,6 @@ python3 scripts/install-local.py
 
 服务仅绑定 `127.0.0.1`，API 需要随机访问密钥，并校验 Host/Origin。状态和历史在内存中；临时运行目录仅当前用户可访问，保存访问密钥、PID 和服务日志。服务停止后删除连接描述文件。浏览器标签页保留最近 40 次探测图，不上传遥测。
 
-
 ## 更新与卸载
 
 工作区源码在 `codex-pulse` 目录。安装副本在 `~/plugins/codex-pulse`，修改工作区不会自动更新已安装副本。更新时先停止服务，将改动同步到安装源码（保留安装生成的 `.mcp.json`），再使用 Codex `plugin-creator` 的 `update_plugin_cachebuster.py`，并重新 `codex plugin add codex-pulse@个人市场名称`。重新打开聊天以加载工具。
@@ -108,3 +107,5 @@ python3 scripts/install-local.py
 菜单栏每 10 秒读取现有监控服务缓存，服务仍按原有频率更新账号额度。服务未启动时自动启动打包在应用内的监控代码。首次运行可能需要几秒获取数据。退出菜单栏不会停止插件共享的后台服务，停止服务请执行 `npm stop`。
 
 每台电脑会在安装时记录自己的 Node 路径，因此需要在目标电脑本地执行安装命令。菜单栏自检随构建执行，覆盖未知/零额度、过期标识、代理确认条件和额度分组选择。
+
+构建还会使用 `vtool` 检查 Mach-O 的 `minos`。如果可执行文件最低系统版本不是 `13.0`，构建会直接失败，避免生成 Info.plist 声明可运行但实际上无法启动的应用。

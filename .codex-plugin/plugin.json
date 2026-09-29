@@ -1,6 +1,6 @@
 {
   "name": "codex-pulse",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "本地实时显示 Codex 使用额度、Token 用量与网络连接质量。",
   "author": {
     "name": "Dere-HanMing"
