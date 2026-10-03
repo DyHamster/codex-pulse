@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { readFile, open } from 'node:fs/promises';
+import { readFile, open, stat, rename } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { descriptor, origin, runtime, prepareRuntime } from './config.mjs';
@@ -17,15 +17,37 @@ export async function ensureService() {
   if (starting) return starting;
   starting = (async () => {
     await prepareRuntime(); const existing = await existingService(); if (existing) return existing;
+    // An occupied port is not a reason to spawn another detached process repeatedly.
+    try {
+      const response = await fetch(origin + '/health', { signal: AbortSignal.timeout(1500) });
+      const health = await response.json().catch(() => null);
+      if (health?.service === 'codex-pulse') {
+        for (let i = 0; i < 30; i++) { await delay(200); const recovered = await existingService(); if (recovered) return recovered; }
+        throw new Error('监控服务仍在运行，但连接文件不可用；请重新启动监控服务');
+      }
+      throw new Error('监控端口被其他程序占用，请设置 CODEX_PULSE_PORT');
+    } catch (e) {
+      if (e.cause?.code !== 'ECONNREFUSED') throw e;
+    }
+    // Bound old startup logs, including historical address-in-use failures.
+    if ((await stat(`${runtime}/service.log`).catch(() => null))?.size > 1024 * 1024) {
+      await rename(`${runtime}/service.log`, `${runtime}/service.previous.log`);
+    }
     const log = await open(`${runtime}/service.log`, 'a', 0o600);
     const child = spawn(process.execPath, [fileURLToPath(new URL('./server.mjs', import.meta.url))], { detached: true, stdio: ['ignore', log.fd, log.fd] });
-    let spawnError; child.on('error', e => { spawnError = e; }); child.unref(); await log.close();
-    for (let i = 0; i < 40; i++) { if (spawnError) throw spawnError; await delay(200); const found = await existingService(); if (found) return found; }
+    let spawnError, exited = false;
+    child.on('error', e => { spawnError = e; }); child.on('exit', () => { exited = true; }); child.unref(); await log.close();
+    for (let i = 0; i < 40; i++) {
+      if (spawnError) throw spawnError;
+      await delay(200); const found = await existingService(); if (found) return found;
+      if (exited) throw new Error(`监控服务启动失败，请检查 ${runtime}/service.log`);
+    }
+    child.kill();
     throw new Error(`监控服务未启动，请检查端口占用或 ${runtime}/service.log`);
   })();
   try { return await starting; } finally { starting = null; }
 }
 export async function api(service, path, method = 'GET') {
-  const res = await fetch(service.origin + path, { method, headers: { Authorization: `Bearer ${service.token}` }, signal: AbortSignal.timeout(5000) });
+  const res = await fetch(service.origin + path, { method, headers: { Authorization: `Bearer ${service.token}` }, signal: AbortSignal.timeout(path === '/api/refresh' ? 45000 : 5000) });
   const data = await res.json(); if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`); return data;
 }

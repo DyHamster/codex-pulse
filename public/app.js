@@ -44,8 +44,9 @@ function notify(key, title, body) { if (!notificationEnabled || Notification.per
 $('notify').onclick = async () => { if (!('Notification' in window)) { $('notice').textContent = '当前浏览器不支持通知'; return; } notificationEnabled = await Notification.requestPermission() === 'granted'; $('notify').textContent = notificationEnabled ? '提醒已开启' : '通知未授权'; };
 $('refresh').onclick = async () => {
   $('refresh').disabled = true;
-  try { const r = await fetch('/api/refresh', { method: 'POST', headers }); const result = await r.json(); if (!r.ok) throw new Error(result.error); $('notice').textContent = '正在刷新…'; } catch (e) { $('notice').textContent = e.message; }
-  finally { setTimeout(() => { $('refresh').disabled = false; }, 10000); }
+  $('refresh').textContent = '刷新中…';
+  try { const r = await fetch('/api/refresh', { method: 'POST', headers }); const result = await r.json(); if (!r.ok) throw new Error(result.error); if (result.snapshot) render(result.snapshot); } catch (e) { $('notice').textContent = e.message; }
+  finally { $('refresh').disabled = false; $('refresh').textContent = '刷新'; }
 };
 async function connect() {
   if (!token) { $('connection').textContent = '需要访问链接'; $('notice').textContent = '请通过插件“打开监控面板”获取含访问密钥的链接。'; return; }

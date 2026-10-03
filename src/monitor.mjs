@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { AppServer } from './app-server.mjs';
 import { probeNetwork } from './network.mjs';
+import { version } from './version.mjs';
 export function normalizeLimits(raw) {
   const map = raw?.rateLimitsByLimitId;
   const buckets = map && Object.keys(map).length ? Object.entries(map) : raw?.rateLimits ? [[raw.rateLimits.limitId || 'codex', raw.rateLimits]] : [];
@@ -21,16 +22,16 @@ export function safeError(e) {
 }
 export class Monitor extends EventEmitter {
   constructor({ client = new AppServer(), probe = probeNetwork } = {}) {
-    super(); this.client = client; this.probe = probe; this.stopped = false; this.timers = []; this.jobs = {};
+    super(); this.client = client; this.probe = probe; this.stopped = false; this.timers = new Set(); this.jobs = {}; this.accountAt = 0; this.usageAttemptAt = 0;
     this.state = { account: null, quotas: { data: [], updatedAt: null, error: null }, usage: { data: null, updatedAt: null, error: null }, network: null };
     client.on('notification', msg => {
       if (msg.method === 'account/rateLimits/updated') this.setLimits(msg.params, true);
-      if (msg.method === 'account/updated') { this.state.account = null; this.state.quotas = { data: [], updatedAt: null, error: null }; this.state.usage = { data: null, updatedAt: null, error: null }; this.emit('update'); void this.refreshAccount(); }
+      if (msg.method === 'account/updated') { this.accountAt = 0; this.usageAttemptAt = 0; this.state.account = null; this.state.quotas = { data: [], updatedAt: null, error: null }; this.state.usage = { data: null, updatedAt: null, error: null }; this.emit('update'); void this.refreshAccount(); }
     });
   }
   snapshot() {
     const now = Date.now();
-    return { service: 'codex-pulse', version: '0.1.0', now, ...this.state,
+    return { service: 'codex-pulse', version, now, ...this.state,
       quotas: { ...this.state.quotas, stale: !!this.state.quotas.error || !this.state.quotas.updatedAt || now - this.state.quotas.updatedAt > 120000 },
       usage: { ...this.state.usage, stale: !!this.state.usage.error || !this.state.usage.updatedAt || now - this.state.usage.updatedAt > 600000 },
       network: this.state.network ? { ...this.state.network, stale: now - this.state.network.checkedAt > 45000 } : null };
@@ -47,33 +48,42 @@ export class Monitor extends EventEmitter {
   refreshAccount() { return this.single('account', async () => {
     try {
       await this.client.connect();
+      if (!this.state.account || Date.now() - this.accountAt > 300000) {
       const response = await this.client.request('account/read', { refreshToken: false });
       const account = response?.account;
       const identity = `${account?.type || ''}/${account?.email || ''}`;
       if (this.identity && this.identity !== identity) { this.state.quotas = { data: [], updatedAt: null, error: null }; this.state.usage = { data: null, updatedAt: null, error: null }; }
       this.identity = identity;
       this.state.account = account ? { type: account.type, plan: account.planType || null, email: account.email ? account.email.replace(/^(.).*(@.*)$/, '$1•••$2') : null } : null;
-      if (account?.type !== 'chatgpt') throw new Error('auth required');
+      this.accountAt = Date.now();
+      }
+      if (this.state.account?.type !== 'chatgpt') throw new Error('auth required');
       const started = Date.now();
       this.setLimits(await this.client.request('account/rateLimits/read', { excludeResetCreditDetails: true }));
       this.state.quotaConnection = { checkedAt: Date.now(), status: 'reachable', elapsedMs: Date.now() - started };
-      if (!this.state.usage.updatedAt || Date.now() - this.state.usage.updatedAt > 300000) {
+      if (Date.now() - this.usageAttemptAt > 300000) {
+        this.usageAttemptAt = Date.now();
+        // Token statistics must not keep a quota refresh or its button waiting.
+        void this.single('usage', async () => {
+        const identity = this.identity;
         try {
           const raw = await this.client.request('account/usage/read');
+          if (identity !== this.identity || this.stopped) return;
           this.state.usage = { data: { summary: raw.summary ?? null, dailyUsageBuckets: raw.dailyUsageBuckets ?? null }, updatedAt: Date.now(), error: null };
-        } catch (e) { this.state.usage.error = safeError(e); }
+        } catch (e) { if (identity === this.identity && !this.stopped) this.state.usage.error = safeError(e); }
+        });
       }
-    } catch (e) { this.state.quotas.error = safeError(e); this.state.quotaConnection = { checkedAt: Date.now(), status: 'error', elapsedMs: null }; }
+    } catch (e) { this.accountAt = 0; this.state.quotas.error = safeError(e); this.state.quotaConnection = { checkedAt: Date.now(), status: 'error', elapsedMs: null }; }
   }); }
   refreshNetwork() { return this.single('network', async () => {
     try { this.state.network = await this.probe(this.state.account?.type); }
     catch { this.state.network = { checkedAt: Date.now(), status: 'network_error', elapsedMs: null, note: '网络探测不可用' }; }
   }); }
   start() {
-    const loop = async (fn, delay) => { if (this.stopped) return; await fn(); if (!this.stopped) { const timer = setTimeout(() => loop(fn, delay), delay()); this.timers.push(timer); if (this.timers.length > 20) this.timers.shift(); } };
+    const loop = async (fn, delay) => { if (this.stopped) return; const started = Date.now(); await fn(); if (!this.stopped) { const timer = setTimeout(() => { this.timers.delete(timer); void loop(fn, delay); }, Math.max(1000, delay() - (Date.now() - started))); this.timers.add(timer); } };
     let failures = 0;
-    void loop(() => this.refreshAccount(), () => this.state.quotas.error ? Math.min(300000, 60000 * 2 ** Math.min(++failures, 3)) : (failures = 0, 60000));
+    void loop(() => this.refreshAccount(), () => this.state.quotas.error ? Math.min(300000, 30000 * 2 ** Math.min(++failures, 4)) : (failures = 0, 30000));
     void loop(() => this.refreshNetwork(), () => this.state.network?.transportReachable ? 15000 : 30000);
   }
-  close() { this.stopped = true; this.timers.forEach(clearTimeout); this.client.close(); }
+  close() { this.stopped = true; this.timers.forEach(clearTimeout); this.timers.clear(); this.client.close(); }
 }

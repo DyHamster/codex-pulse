@@ -1,15 +1,18 @@
 import { createInterface } from 'node:readline';
 import { ensureService, api } from './service.mjs';
+import { openMenubar } from './menubar.mjs';
+import { version } from './version.mjs';
 const definitions = [
   ['get_status', '读取 Codex 账号剩余额度、已用 Token 与网络探测快照。额度是百分比，不是剩余 Token 数。'],
-  ['diagnose_network', '请求一次额度与网络刷新，立即返回缓存和刷新状态；探测不调用模型。'],
-  ['get_dashboard_url', '获取本地实时监控面板链接，链接含本机访问密钥，仅向当前用户展示。']
-].map(([name, description]) => ({ name, description, inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } }));
+  ['diagnose_network', '刷新额度并返回完成后的快照，网络探测同时启动；探测不调用模型。'],
+  ['get_dashboard_url', '获取本地实时监控面板链接，链接含本机访问密钥，仅向当前用户展示。'],
+  ['open_menubar', '手动打开已安装的 macOS 菜单栏应用 Codex Pulse，退出后可再次打开。']
+].map(([name, description]) => ({ name, description, inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: name !== 'open_menubar', destructiveHint: false, idempotentHint: true, openWorldHint: true } }));
 const send = data => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...data }) + '\n');
 async function handle(msg) {
   if (msg.id === undefined) return;
   const reply = result => send({ id: msg.id, result });
-  if (msg.method === 'initialize') return reply({ protocolVersion: ['2024-11-05', '2025-03-26', '2025-06-18'].includes(msg.params?.protocolVersion) ? msg.params.protocolVersion : '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'codex-pulse', version: '0.1.0' } });
+  if (msg.method === 'initialize') return reply({ protocolVersion: ['2024-11-05', '2025-03-26', '2025-06-18'].includes(msg.params?.protocolVersion) ? msg.params.protocolVersion : '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'codex-pulse', version } });
   if (msg.method === 'ping') return reply({});
   if (msg.method === 'tools/list') return reply({ tools: definitions });
   if (msg.method !== 'tools/call') return send({ id: msg.id, error: { code: -32601, message: 'Method not found' } });
@@ -17,6 +20,10 @@ async function handle(msg) {
   if (!definitions.some(t => t.name === name)) return send({ id: msg.id, error: { code: -32602, message: 'Unknown tool' } });
   if (msg.params?.arguments && Object.keys(msg.params.arguments).length) return send({ id: msg.id, error: { code: -32602, message: 'This tool accepts no arguments' } });
   try {
+    if (name === 'open_menubar') {
+      const data = await openMenubar();
+      return reply({ content: [{ type: 'text', text: JSON.stringify(data) }], structuredContent: data });
+    }
     const s = await ensureService(); let data;
     if (name === 'get_dashboard_url') data = { url: `${s.origin}/#${s.token}` };
     else {

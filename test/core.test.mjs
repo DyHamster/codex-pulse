@@ -41,3 +41,17 @@ test('deduplicate concurrent refresh and preserve unrelated event buckets', asyn
   assert.equal(m.snapshot().quotas.data.length, 2); m.close();
 });
 test('errors do not leak server message contents', () => { assert.equal(safeError(new Error('secret credentials')), '查询失败，请检查 Codex 登录状态和网络连接'); });
+
+test('slow Token statistics never delay quota refresh, account reads are cached', async () => {
+  const client = new FakeClient(); const original = client.request.bind(client); let resolveUsage; let accounts = 0;
+  client.request = method => {
+    if (method === 'account/read') accounts++;
+    if (method === 'account/usage/read') return new Promise(resolve => { resolveUsage = resolve; });
+    return original(method);
+  };
+  const m = new Monitor({ client });
+  await m.refreshAccount(); assert.equal(m.snapshot().quotas.stale, false); assert.equal(m.snapshot().usage.data, null);
+  await m.refreshAccount(); assert.equal(accounts, 1);
+  resolveUsage({ summary: { lifetimeTokens: 123 }, dailyUsageBuckets: [] }); await m.jobs.usage;
+  assert.equal(m.snapshot().usage.data.summary.lifetimeTokens, 123); m.close();
+});

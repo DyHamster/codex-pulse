@@ -1,6 +1,6 @@
 {
   "name": "codex-pulse",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -12,6 +12,7 @@
     "status": "node src/cli.mjs status",
     "test": "node --test",
     "mcp": "node src/mcp.mjs",
+    "open:menubar": "node src/cli.mjs menubar",
     "build:menubar": "node scripts/build-menubar.mjs",
     "install:menubar": "node scripts/install-menubar.mjs",
     "install:all": "python3 scripts/install-local.py && node scripts/install-menubar.mjs"

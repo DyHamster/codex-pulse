@@ -10,7 +10,9 @@ test('MCP initialization, discovery, invalid tools and protocol errors', async t
   const call = (method, params) => new Promise(resolve => { const n = ++id; pending.set(n, resolve); proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', id: n, method, params }) + '\n'); });
   const init = await call('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test', version: '1' } });
   assert.equal(init.result.protocolVersion, '2025-03-26');
-  const list = await call('tools/list'); assert.equal(list.result.tools.length, 3);
+  const list = await call('tools/list'); assert.equal(list.result.tools.length, 4);
+  const menubar = list.result.tools.find(tool => tool.name === 'open_menubar');
+  assert.ok(menubar); assert.equal(menubar.annotations.readOnlyHint, false);
   assert.equal((await call('tools/call', { name: 'bad' })).error.code, -32602);
   assert.equal((await call('unknown')).error.code, -32601);
 });

@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { descriptor, origin } from '../src/config.mjs';
+import { version } from '../src/version.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const app = join(root, 'build/Codex Pulse.app');
@@ -23,7 +24,7 @@ const swiftTarget = `${targetArch}-apple-macosx${minimumMacOS}`;
 
 await mkdir(join(app, 'Contents/MacOS'), { recursive: true });
 await mkdir(resources, { recursive: true });
-const plist = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>local.codex.pulse.menubar</string><key>CFBundleName</key><string>Codex Pulse</string><key>CFBundleExecutable</key><string>CodexPulse</string><key>CFBundleVersion</key><string>1</string><key>CFBundleShortVersionString</key><string>0.2.1</string><key>CFBundlePackageType</key><string>APPL</string><key>LSUIElement</key><true/><key>LSMinimumSystemVersion</key><string>${minimumMacOS}</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict></dict></plist>`;
+const plist = `<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>local.codex.pulse.menubar</string><key>CFBundleName</key><string>Codex Pulse</string><key>CFBundleExecutable</key><string>CodexPulse</string><key>CFBundleVersion</key><string>${version}</string><key>CFBundleShortVersionString</key><string>${version}</string><key>CFBundlePackageType</key><string>APPL</string><key>LSUIElement</key><true/><key>LSMinimumSystemVersion</key><string>${minimumMacOS}</string><key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict></dict></plist>`;
 await writeFile(join(app, 'Contents/Info.plist'), plist);
 await writeFile(join(resources, 'config.json'), JSON.stringify({ node: process.execPath, descriptor, origin }));
 for (const dir of ['src', 'public']) await cp(join(root, dir), join(resources, 'monitor', dir), { recursive: true });

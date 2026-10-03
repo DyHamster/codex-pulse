@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { EventEmitter } from 'node:events';
+import { version } from './version.mjs';
 export function codexBinary() {
   if (process.env.CODEX_PULSE_CODEX_BIN) return process.env.CODEX_PULSE_CODEX_BIN;
   for (const p of ['/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex', '/Applications/Codex.app/Contents/Resources/codex']) if (existsSync(p)) return p;
@@ -22,6 +23,7 @@ export class AppServer extends EventEmitter {
       if (this.child !== child) return;
       for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('Codex 服务已断开')); }
       this.pending.clear(); this.child = null; this.ready = null;
+      lines.close(); if (child.exitCode === null) child.kill();
     };
     child.on('error', fail); child.on('exit', fail); child.stdin.on('error', fail);
     const lines = createInterface({ input: child.stdout });
@@ -35,7 +37,7 @@ export class AppServer extends EventEmitter {
         if (msg.error) { const e = new Error(msg.error.message); e.code = msg.error.code; p.reject(e); } else p.resolve(msg.result);
       } else if (msg.method) this.emit('notification', msg);
     });
-    await this.request('initialize', { clientInfo: { name: 'codex_pulse', title: 'Codex Pulse', version: '0.1.0' }, capabilities: { experimentalApi: true } });
+    await this.request('initialize', { clientInfo: { name: 'codex_pulse', title: 'Codex Pulse', version }, capabilities: { experimentalApi: true } });
     child.stdin.write(JSON.stringify({ method: 'initialized', params: {} }) + '\n');
   }
   request(method, params = {}) {
@@ -49,6 +51,6 @@ export class AppServer extends EventEmitter {
   }
   close() {
     for (const p of this.pending.values()) { clearTimeout(p.timer); p.reject(new Error('Codex 服务已关闭')); }
-    this.pending.clear(); this.child?.kill(); this.child = null; this.ready = null;
+    this.pending.clear(); this.child?.stdin.end(); this.child?.kill(); this.child = null; this.ready = null;
   }
 }
