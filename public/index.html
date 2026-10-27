@@ -1,8 +1,56 @@
-<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Codex Pulse · 实时监控</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head><body>
-<div class="shell"><header><a class="brand" href="/" aria-label="Codex Pulse"><span class="brandmark">∿</span> Codex Pulse <span class="tag">LOCAL</span></a><span id="connection" class="connection">正在连接</span></header>
-<main><div class="intro"><div><div class="eyebrow">YOUR WORKSPACE, AT A GLANCE</div><h1>专注创作，状态一目了然。</h1><p>随时掌握 Codex 使用额度与连接质量。</p></div><div class="actions"><button id="notify">开启提醒</button><button id="refresh" class="primary">↻ 刷新状态</button></div></div>
-<div class="meta"><span id="account">正在读取账号…</span><span id="updated">等待首次采集</span></div><div id="notice" role="status" aria-live="polite"></div>
-<section aria-label="使用额度"><div class="section-heading"><h2>可用额度</h2><span>账号共享 · 自动刷新</span></div><div id="quotas" class="quota-grid"><article class="card placeholder">正在读取额度…</article></div></section>
-<div class="bottom-grid"><section class="card network"><div class="section-heading"><h2>连接质量</h2><span class="pill" id="network-badge">检测中</span></div><div class="network-main"><strong id="latency">—</strong><span>ms / HTTPS 请求耗时</span></div><div id="network-detail" class="detail-list"></div><p class="footnote" id="network-note">正在检测服务连通性。</p><div id="spark" class="spark" aria-label="最近探测延迟"></div></section>
-<section class="card"><div class="section-heading"><h2>Token 用量</h2><span class="pill">已消耗</span></div><div class="token-grid"><div><span>最近统计日</span><strong id="daily">—</strong><small id="daily-date">等待数据</small></div><div><span>累计使用</span><strong id="lifetime">—</strong><small>账号统计</small></div></div><p class="footnote" id="usage-note">统计存在延迟，已用 Token 不等于剩余额度。</p></section></div>
-<footer><span class="dot"></span> 本机运行 · 监控不发起模型推理请求 <span class="footer-right">CODEX PULSE / 0.1</span></footer></main></div></body></html>
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Codex Pulse · 额度详情</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <a class="brand" href="/" aria-label="Codex Pulse 首页"><span class="brandmark" aria-hidden="true">∿</span><span>Codex Pulse<small>本机监控</small></span></a>
+      <span id="connection" class="connection" data-tone="pending" role="status">正在连接</span>
+    </header>
+    <main>
+      <div class="intro">
+        <div><div class="eyebrow">使用概览</div><h1>额度与连接，一目了然。</h1><p>查看剩余额度、重置时间与账号用量。</p></div>
+        <div class="actions"><button id="notify" type="button">开启提醒</button><button id="refresh" type="button" class="primary" disabled>刷新状态</button></div>
+      </div>
+      <div class="meta"><span id="account">正在读取账号…</span><span id="updated">等待首次采集</span></div>
+      <div id="notice" role="status" aria-live="polite"></div>
+      <section aria-labelledby="quota-heading">
+        <div class="section-heading"><h2 id="quota-heading">剩余额度</h2><span>账号共享 · 约 30 秒自动更新</span></div>
+        <div id="quotas" class="quota-grid" aria-busy="true"><article class="card placeholder">正在读取额度…</article></div>
+        <p class="section-note">额度百分比不等于剩余 Token 数；周期与重置时间以服务端返回为准。</p>
+      </section>
+      <div class="bottom-grid">
+        <section class="card network" aria-labelledby="network-heading">
+          <div class="section-heading"><h2 id="network-heading">连接状态</h2><span class="pill" id="network-badge" data-tone="pending">等待查询</span></div>
+          <div class="network-main"><strong id="latency">—</strong><span>ms<span>额度接口查询耗时</span></span></div>
+          <p id="quota-network-note" class="status-copy">正在确认实际额度接口是否可用。</p>
+          <details class="diagnostics"><summary><span id="probe-heading">系统网络探测</span> <span id="probe-status">等待检测</span></summary>
+            <div id="network-detail" class="detail-list"></div>
+            <div id="spark" class="spark" aria-label="最近最多40次独立探测延迟"></div>
+            <p class="footnote" id="network-note">独立探测不代表模型生成速度。</p>
+            <details id="environment-probe" class="environment-probe" hidden>
+              <summary>环境代理诊断（辅助）<span id="environment-status"></span></summary>
+              <p class="footnote" id="environment-detail"></p>
+            </details>
+          </details>
+        </section>
+        <section class="card" aria-labelledby="usage-heading">
+          <div class="section-heading"><h2 id="usage-heading">Token 用量</h2><span class="pill" id="usage-badge">账号统计</span></div>
+          <div class="token-grid"><div><span>最近统计日</span><strong id="daily">—</strong><small id="daily-date">等待数据</small></div><div><span>累计使用</span><strong id="lifetime">—</strong><small>已消耗 Token</small></div></div>
+          <div class="chart-heading"><span>最近 14 个统计日</span><span id="usage-range">暂无数据</span></div>
+          <div id="usage-chart" class="usage-chart" aria-label="最近14个统计日的Token用量"></div>
+          <p class="footnote" id="usage-note">用量统计存在延迟，与剩余额度分别计算。</p>
+        </section>
+      </div>
+      <footer><span>本机运行 · 监控不发起模型推理请求</span><span id="version">Codex Pulse</span></footer>
+    </main>
+  </div>
+</body>
+</html>

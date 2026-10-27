@@ -1,6 +1,26 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 const run = promisify(execFile);
+// Accept only structured samples from the native URLSession probe, never raw error text.
+export function normalizeSystemProbe(raw, now = Date.now()) {
+  if (!raw || !Number.isFinite(raw.checkedAt) || raw.checkedAt > now + 5000 || now - raw.checkedAt > 65000) return null;
+  if (!Number.isFinite(raw.elapsedMs) || raw.elapsedMs < 0 || raw.elapsedMs > 120000) return null;
+  if (raw.httpStatus !== null && (!Number.isInteger(raw.httpStatus) || raw.httpStatus < 100 || raw.httpStatus > 599)) return null;
+  if (raw.viaProxy !== null && typeof raw.viaProxy !== 'boolean') return null;
+  if (typeof raw.proxyConfigured !== 'boolean') return null;
+  const failures = ['timeout', 'dns_error', 'connect_error', 'tls_error', 'network_error', 'proxy_error'];
+  if (raw.failure !== null && !failures.includes(raw.failure)) return null;
+  const reachable = raw.httpStatus !== null && raw.httpStatus !== 407 && raw.failure === null;
+  return {
+    checkedAt: raw.checkedAt, source: 'system', target: 'https://chatgpt.com/',
+    status: raw.httpStatus === 407 ? 'proxy_error' : raw.failure || classifyNetwork(0, raw.httpStatus || 0, raw.elapsedMs),
+    httpStatus: raw.httpStatus, elapsedMs: Math.round(raw.elapsedMs),
+    viaProxy: raw.viaProxy, proxyConfigured: raw.proxyConfigured,
+    proxy: reachable && raw.viaProxy === true ? 'system' : reachable && raw.viaProxy === false ? 'direct' : 'unconfirmed',
+    routeVerified: reachable && raw.viaProxy !== null, transportReachable: reachable,
+    note: '与菜单栏共享 macOS 系统网络探测结果；不排除 VPN/TUN，也不保证模型请求使用相同路径。',
+  };
+}
 export function classifyNetwork(code, http, elapsed) {
   if (code) return ({ 5: 'proxy_error', 6: 'dns_error', 7: 'connect_error', 28: 'timeout', 35: 'tls_error', 60: 'tls_error' })[code] || 'network_error';
   if (http === 401) return 'auth_required';

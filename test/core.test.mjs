@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { normalizeLimits, Monitor, safeError } from '../src/monitor.mjs';
-import { classifyNetwork } from '../src/network.mjs';
+import { normalizeLimits, Monitor, safeError, isAuthenticationError } from '../src/monitor.mjs';
+import { classifyNetwork, normalizeSystemProbe } from '../src/network.mjs';
 const raw = { rateLimitsByLimitId: { codex: { primary: { usedPercent: 40, windowDurationMins: 300, resetsAt: 1790619847 }, secondary: { usedPercent: 22, windowDurationMins: 10080 } } } };
 test('quota: missing is unknown, zero is real, multiple buckets and clamping', () => {
   assert.equal(normalizeLimits(raw)[0].windows[0].remainingPercent, 60);
@@ -54,4 +54,68 @@ test('slow Token statistics never delay quota refresh, account reads are cached'
   await m.refreshAccount(); assert.equal(accounts, 1);
   resolveUsage({ summary: { lifetimeTokens: 123 }, dailyUsageBuckets: [] }); await m.jobs.usage;
   assert.equal(m.snapshot().usage.data.summary.lifetimeTokens, 123); m.close();
+});
+
+class ExpiredClient extends FakeClient {
+  closes = 0; forceReads = 0; persistent = false; needsRefresh = false; renewed = false;
+  close() { this.closes++; }
+  async request(method, params) {
+    if (method === 'account/read' && params?.refreshToken) { this.forceReads++; this.renewed = true; }
+    if (method === 'account/rateLimits/read' && (this.persistent || this.closes === 0 || (this.needsRefresh && !this.renewed))) {
+      throw Object.assign(new Error('401 Unauthorized: expired access token'), { code: 401 });
+    }
+    return super.request(method, params);
+  }
+}
+test('expired long-lived connection reloads credentials once and coalesces callers', async () => {
+  const client = new ExpiredClient(); const m = new Monitor({ client });
+  await Promise.all([m.refreshAccount(), m.refreshAccount(), m.refreshAccount()]);
+  assert.equal(client.closes, 1); assert.equal(client.forceReads, 0);
+  assert.equal(m.snapshot().quotas.stale, false); assert.equal(m.snapshot().quotaConnection.status, 'reachable'); m.close();
+});
+test('credentials still expired after reconnect get one Codex-managed token refresh', async () => {
+  const client = new ExpiredClient(); client.needsRefresh = true; const m = new Monitor({ client });
+  await m.refreshAccount(); assert.equal(client.closes, 1); assert.equal(client.forceReads, 1);
+  assert.equal(m.snapshot().quotas.stale, false); m.close();
+});
+test('persistent auth failure preserves quota and cooldown prevents restart storms', async () => {
+  const client = new ExpiredClient(); client.closes = 1; const m = new Monitor({ client });
+  await m.refreshAccount(); const good = m.snapshot().quotas.data;
+  client.persistent = true; await m.refreshAccount();
+  assert.deepEqual(m.snapshot().quotas.data, good); assert.equal(m.snapshot().quotas.stale, true);
+  assert.match(m.snapshot().quotas.error, /登录状态不可用/);
+  const closes = client.closes, forced = client.forceReads;
+  await Promise.all([m.refreshAccount(), m.refreshAccount()]);
+  assert.equal(client.closes, closes); assert.equal(client.forceReads, forced); m.close();
+});
+test('network failures and limits do not trigger authentication recovery', async () => {
+  for (const message of ['timeout', '429 rate limit', '403 access denied']) {
+    const client = new ExpiredClient(); client.request = async () => { throw new Error(message); };
+    const m = new Monitor({ client }); await m.refreshAccount(); assert.equal(client.closes, 0); m.close();
+  }
+  assert.equal(isAuthenticationError(new Error('Your refresh token was already used')), true);
+});
+
+const systemSample = () => ({ checkedAt: Date.now(), elapsedMs: 355, httpStatus: 200, viaProxy: true, proxyConfigured: true, failure: null });
+test('system network is authoritative even when the environment route times out', () => {
+  const m = new Monitor({ client: new FakeClient() });
+  m.state.network = { checkedAt: Date.now(), status: 'timeout', httpStatus: null, transportReachable: false };
+  assert.equal(m.setSystemNetwork(systemSample()), true);
+  const s = m.snapshot(); assert.equal(s.network.source, 'system'); assert.equal(s.network.httpStatus, 200);
+  assert.equal(s.network.proxy, 'system'); assert.equal(s.environmentNetwork.status, 'timeout');
+  m.systemNetwork.checkedAt -= 66000;
+  assert.equal(m.snapshot().network.stale, true); assert.equal(m.snapshot().network.source, 'system'); m.close();
+});
+test('system probe validates timestamps, proxy evidence and failures', () => {
+  const raw = systemSample();
+  assert.equal(normalizeSystemProbe({ ...raw, checkedAt: raw.checkedAt - 70000 }), null);
+  assert.equal(normalizeSystemProbe({ ...raw, checkedAt: raw.checkedAt + 10000 }), null);
+  assert.equal(normalizeSystemProbe({ ...raw, viaProxy: 'yes' }), null);
+  assert.equal(normalizeSystemProbe({ ...raw, httpStatus: 0 }), null);
+  assert.equal(normalizeSystemProbe({ ...raw, failure: 'secret-error' }), null);
+  const direct = normalizeSystemProbe({ ...raw, viaProxy: false }); assert.equal(direct.proxy, 'direct');
+  const failure = normalizeSystemProbe({ ...raw, failure: 'timeout', httpStatus: null });
+  assert.equal(failure.routeVerified, false); assert.equal(failure.proxy, 'unconfirmed');
+  assert.equal(normalizeSystemProbe({ ...raw, httpStatus: 403 }).transportReachable, true);
+  assert.equal(normalizeSystemProbe({ ...raw, httpStatus: 407 }).transportReachable, false);
 });

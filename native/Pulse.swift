@@ -9,8 +9,8 @@ struct QuotaWindow: Decodable {
     let resetsAt: Double?
 }
 struct QuotaBucket: Decodable { let id: String; let windows: [QuotaWindow] }
-struct Quotas: Decodable { let data: [QuotaBucket]; let updatedAt: Double?; let stale: Bool }
-struct Snapshot: Decodable { let quotas: Quotas }
+struct Quotas: Decodable { let data: [QuotaBucket]; let updatedAt: Double?; let stale: Bool; let error: String? }
+struct Snapshot: Decodable { let quotas: Quotas; let systemProbeRequestedAt: Double? }
 struct Service: Decodable { let token: String; let origin: String }
 struct Config: Decodable { let node: String; let descriptor: String; let origin: String }
 
@@ -100,6 +100,7 @@ final class Probe: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     var response: HTTPURLResponse?
     var started = Date()
     var configured = false
+    var completedNetwork: [String: Any]?
     var completion: ((String, String) -> Void)?
     override init() {
         super.init()
@@ -137,6 +138,24 @@ final class Probe: NSObject, URLSessionDataDelegate, @unchecked Sendable {
         } else {
             detail = configured ? "已配置系统代理，但探测未成功" : "未检测到系统代理，连接状态未确认"
         }
+        var failure: String?
+        if let error = error as? URLError {
+            switch error.code {
+            case .timedOut: failure = "timeout"
+            case .cannotFindHost, .dnsLookupFailed: failure = "dns_error"
+            case .cannotConnectToHost, .notConnectedToInternet, .networkConnectionLost: failure = "connect_error"
+            case .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted, .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid: failure = "tls_error"
+            default: failure = "network_error"
+            }
+        } else if error != nil { failure = "network_error" }
+        completedNetwork = [
+            "checkedAt": Date().timeIntervalSince1970 * 1000,
+            "httpStatus": code.map { $0 as Any } ?? NSNull(),
+            "elapsedMs": elapsed,
+            "viaProxy": viaProxy.map { $0 as Any } ?? NSNull(),
+            "proxyConfigured": configured,
+            "failure": failure.map { $0 as Any } ?? NSNull()
+        ]
         self.task = nil; completion?(text, detail)
     }
 }
@@ -149,6 +168,10 @@ final class PulseApp: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     var quotaAt: Date?
     var quotaFailed = true
     var fetching = false
+    var startupCheckPending = true
+    var lastSystemProbeRequest: Double = 0
+    var publishedNetworkKey: String?
+    var publishingNetwork = false
     var proxyText = "代理?"
     var proxyDetail = "正在检测系统代理…"
     var probeAt: Date?
@@ -200,9 +223,15 @@ final class PulseApp: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         configurePopover()
         item.button?.target = self; item.button?.action = #selector(togglePopover)
         item.button?.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
-        probe.completion = { [weak self] text, detail in self?.proxyText = text; self?.proxyDetail = detail; self?.probeAt = Date(); self?.render() }
+        probe.completion = { [weak self] text, detail in
+            self?.proxyText = text; self?.proxyDetail = detail; self?.probeAt = Date(); self?.render(); self?.publishSystemNetwork()
+        }
         stream.received = { [weak self] snapshot in
+            if !snapshot.quotas.stale { self?.refreshMessage = nil }
             self?.snapshot = snapshot; self?.quotaFailed = false; self?.quotaAt = Date(); self?.render()
+            if let self = self, let requested = snapshot.systemProbeRequestedAt, requested > self.lastSystemProbeRequest {
+                self.lastSystemProbeRequest = requested; self.probe.check()
+            }
         }
         stream.disconnected = { [weak self] in
             self?.quotaFailed = true; self?.render()
@@ -328,8 +357,33 @@ final class PulseApp: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                 if let data = data, (response as? HTTPURLResponse)?.statusCode == 200, let snapshot = try? JSONDecoder().decode(Snapshot.self, from: data) {
                     self.snapshot = snapshot; self.quotaFailed = false; self.quotaAt = Date()
                     self.stream.connect(s)
+                    self.publishSystemNetwork()
+                    if self.startupCheckPending { self.refresh() }
                 } else { self.quotaFailed = true; self.startService() }
                 self.render()
+            }
+        }.resume()
+    }
+    func publishSystemNetwork() {
+        guard !publishingNetwork, let s = readService(), let sample = probe.completedNetwork,
+              let checkedAt = sample["checkedAt"] as? Double,
+              Date().timeIntervalSince1970 * 1000 - checkedAt < 65000,
+              let data = try? JSONSerialization.data(withJSONObject: sample) else { return }
+        let key = s.token + String(checkedAt)
+        guard key != publishedNetworkKey else { return }
+        publishingNetwork = true
+        var request = URLRequest(url: URL(string: s.origin + "/api/network/system")!)
+        request.httpMethod = "POST"; request.httpBody = data
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer " + s.token, forHTTPHeaderField: "Authorization")
+        localSession.dataTask(with: request) { [weak self] _, response, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.publishingNetwork = false
+                if (response as? HTTPURLResponse)?.statusCode == 200 {
+                    self.publishedNetworkKey = key
+                    if (self.probe.completedNetwork?["checkedAt"] as? Double) != checkedAt { self.publishSystemNetwork() }
+                }
             }
         }.resume()
     }
@@ -356,7 +410,8 @@ final class PulseApp: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             let formatter = DateFormatter(); formatter.dateFormat = "HH:mm:ss"
             updatedLine.stringValue = "更新于 \(formatter.string(from: Date(timeIntervalSince1970: at / 1000)))\(stale ? " · 已过期" : "")"
         } else { updatedLine.stringValue = "额度尚未获取" }
-        if let message = refreshMessage { updatedLine.stringValue = message }
+        if let message = refreshMessage ?? snapshot?.quotas.error { updatedLine.stringValue = message }
+        updatedLine.toolTip = updatedLine.stringValue
     }
     func writeDisplayStatus() {
         guard let config = config, let item = item else { return }
@@ -391,9 +446,13 @@ final class PulseApp: NSObject, NSApplicationDelegate, NSPopoverDelegate {
                    let raw = object["snapshot"], let encoded = try? JSONSerialization.data(withJSONObject: raw),
                    let snapshot = try? JSONDecoder().decode(Snapshot.self, from: encoded) {
                     self.snapshot = snapshot; self.quotaFailed = false; self.stream.connect(s)
+                    self.startupCheckPending = false
                     self.refreshMessage = snapshot.quotas.stale ? "额度未更新，请检查登录与网络" : nil
                 } else {
                     self.refreshMessage = (response as? HTTPURLResponse)?.statusCode == 429 ? "刷新过于频繁，请稍后重试" : "刷新失败，稍后自动重试"
+                    if self.startupCheckPending, (response as? HTTPURLResponse)?.statusCode == 429 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in self?.refresh() }
+                    }
                 }
                 self.render()
             }

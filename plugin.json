@@ -1,7 +1,7 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "codex-pulse",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "Display Codex quota and proxy status in the macOS menu bar.",
   "author": {
     "name": "Dere-HanMing"

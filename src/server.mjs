@@ -27,6 +27,14 @@ export async function startServer({ monitor = new Monitor(), listenPort = port, 
       if (req.method === 'GET' && assets.has(asset)) { res.setHeader('Content-Type', asset.endsWith('.css') ? 'text/css' : asset.endsWith('.js') ? 'text/javascript' : 'text/html; charset=utf-8'); return res.end(assets.get(asset)); }
       if (!auth(req)) return json(res, 401, { error: 'Authentication required' });
       scheduleIdleClose();
+      if (req.method === 'POST' && path === '/api/network/system') {
+        let body = '', bytes = 0;
+        for await (const chunk of req) { bytes += chunk.length; if (bytes <= 4096) body += chunk.toString('utf8'); }
+        if (bytes > 4096) return json(res, 413, { error: 'Network sample too large' });
+        let data; try { data = JSON.parse(body); } catch { return json(res, 400, { error: 'Invalid network sample' }); }
+        if (!monitor.setSystemNetwork?.(data)) return json(res, 400, { error: 'Invalid or superseded network sample' });
+        return json(res, 200, { accepted: true });
+      }
       if (req.method === 'GET' && path === '/api/status') return json(res, 200, monitor.snapshot());
       if (req.method === 'GET' && path === '/api/events') {
         res.writeHead(200, { 'Content-Type': 'text/event-stream', Connection: 'keep-alive' });
@@ -37,7 +45,7 @@ export async function startServer({ monitor = new Monitor(), listenPort = port, 
       if (req.method === 'POST' && path === '/api/refresh') {
         if (!refreshJob) {
           if (Date.now() - lastRefresh < 3000) return json(res, 429, { error: '请等待 3 秒后再刷新' });
-          lastRefresh = Date.now(); void monitor.refreshNetwork();
+          lastRefresh = Date.now(); monitor.requestSystemProbe?.(); void monitor.refreshNetwork();
           refreshJob = monitor.refreshAccount().finally(() => { refreshJob = null; });
         }
         await refreshJob;

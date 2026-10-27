@@ -28,6 +28,7 @@ export class AppServer extends EventEmitter {
     child.on('error', fail); child.on('exit', fail); child.stdin.on('error', fail);
     const lines = createInterface({ input: child.stdout });
     lines.on('line', line => {
+      if (this.child !== child) return;
       let msg; try { msg = JSON.parse(line); } catch { return; }
       if (msg.id !== undefined && msg.method) {
         child.stdin.write(JSON.stringify({ id: msg.id, error: { code: -32601, message: 'Read-only monitor does not support server requests' } }) + '\n');

@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { startServer } from '../src/server.mjs';
+import { Monitor } from '../src/monitor.mjs';
 class Stub extends EventEmitter {
   refreshes = 0;
   snapshot() { return { service: 'codex-pulse', quotas: { data: [], stale: true } }; }
@@ -63,4 +64,27 @@ test('a lost descriptor is repaired and removed when the service stops', async t
   while (Date.now() < deadline) { data = await readFile(path, 'utf8').catch(() => null); if (data) break; await delay(30); }
   assert.equal(JSON.parse(data).token, s.token); await s.close();
   await assert.rejects(readFile(path), { code: 'ENOENT' });
+});
+
+test('native probe samples require authentication and appear in API and live snapshots', async t => {
+  const client = new EventEmitter(); client.close = () => {};
+  const monitor = new Monitor({ client }); monitor.start = () => {};
+  monitor.refreshAccount = async () => {}; monitor.refreshNetwork = async () => {};
+  const s = await startServer({ monitor, listenPort: 0, persist: false, idleTimeoutMs: 0 }); t.after(() => s.close());
+  const base = `http://127.0.0.1:${s.server.address().port}`;
+  const headers = { Authorization: `Bearer ${s.token}`, 'Content-Type': 'application/json' };
+  const sample = { checkedAt: Date.now(), elapsedMs: 355, httpStatus: 200, viaProxy: true, proxyConfigured: true, failure: null };
+  const request = { method: 'POST', headers, body: JSON.stringify(sample) };
+  assert.equal((await fetch(base + '/api/network/system', { ...request, headers: {} })).status, 401);
+  assert.equal((await fetch(base + '/api/network/system', { ...request, body: '{}' })).status, 400);
+  assert.equal((await fetch(base + '/api/network/system', { ...request, body: 'a'.repeat(5000) })).status, 413);
+  assert.equal((await fetch(base + '/api/network/system', request)).status, 200);
+  assert.equal((await fetch(base + '/api/network/system', request)).status, 400);
+  const status = await (await fetch(base + '/api/status', { headers })).json();
+  assert.equal(status.network.proxy, 'system'); assert.equal(status.network.httpStatus, 200);
+  const events = await fetch(base + '/api/events', { headers }); const reader = events.body.getReader();
+  const first = JSON.parse(new TextDecoder().decode((await reader.read()).value).slice(6));
+  assert.deepEqual(first.network, status.network); await reader.cancel();
+  const refreshed = await (await fetch(base + '/api/refresh', { method: 'POST', headers })).json();
+  assert.ok(refreshed.snapshot.systemProbeRequestedAt > 0);
 });

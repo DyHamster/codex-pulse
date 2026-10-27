@@ -19,6 +19,8 @@ try {
 } catch (error) {
   if (error.status !== 1) throw error;
 }
+// A menu bar replacement alone would keep the previous detached backend alive.
+execFileSync(process.execPath, [join(root, 'src', 'cli.mjs'), 'stop'], { stdio: 'inherit' });
 await cp(source, destination, { recursive: true, force: true });
 execFileSync('open', [destination]);
 console.log(`Installed and opened: ${destination}`);
